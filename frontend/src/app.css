@@ -162,3 +162,15 @@ body {
   color: #991b1b;
   font-size: 13px;
 }
+
+.retry-area {
+  display: flex;
+  gap: 10px;
+  margin: 10px 0;
+}
+
+.retry-area button {
+  padding: 10px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+}

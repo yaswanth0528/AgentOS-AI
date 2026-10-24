@@ -1,37 +1,59 @@
 
-import time
 import logging
+import random
+import time
+from time import perf_counter
 
 from google import genai
-from google.genai import types
-from google.genai import errors
+from google.genai import errors, types
 
 from app.config import GEMINI_API_KEY
 
 logger = logging.getLogger(__name__)
 
-# HTTP timeout: 45 seconds per request attempt
+MODEL_NAME = "gemini-3.6-flash"
+
+# Limit individual HTTP requests to 15 seconds.
+REQUEST_TIMEOUT_MS = 15000
+
+# One initial request + one retry.
+MAX_ATTEMPTS = 2
+
+RETRYABLE_CODES = {429, 500, 502, 503, 504}
+
 client = genai.Client(
     api_key=GEMINI_API_KEY,
-    http_options=types.HttpOptions(timeout=45000),
+    http_options=types.HttpOptions(
+        timeout=REQUEST_TIMEOUT_MS,
+        retry_options=types.HttpRetryOptions(
+            attempts=1,
+        ),
+    ),
 )
-
-MODEL_NAME = "gemini-3.6-flash"
-MAX_ATTEMPTS = 3
-RETRY_DELAYS = [1, 2]
 
 
 def generate_response(message: str) -> str:
     """
-    Generate a response using Gemini.
-    Retry temporary API errors up to two times.
+    Generate a Gemini response with limited retries.
+
+    The SDK's own retries are disabled so that this
+    function controls application-level retries.
     """
 
-    for attempt in range(MAX_ATTEMPTS):
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        started = perf_counter()
+
         try:
             response = client.models.generate_content(
                 model=MODEL_NAME,
                 contents=message,
+            )
+
+            elapsed = perf_counter() - started
+
+            print(
+                f"AgentOS: Gemini attempt {attempt} "
+                f"completed in {elapsed:.2f} seconds"
             )
 
             answer = (response.text or "").strip()
@@ -44,32 +66,37 @@ def generate_response(message: str) -> str:
             return answer
 
         except errors.APIError as exc:
+            elapsed = perf_counter() - started
             status_code = getattr(exc, "code", None)
 
-            # Retry only temporary errors.
-            if status_code not in (429, 500, 502, 503, 504):
-                logger.exception(
-                    "Gemini API returned a non-retryable error."
+            logger.warning(
+                "Gemini attempt %s failed: HTTP %s "
+                "after %.2f seconds",
+                attempt,
+                status_code,
+                elapsed,
+            )
+
+            if status_code not in RETRYABLE_CODES:
+                raise
+
+            if attempt >= MAX_ATTEMPTS:
+                logger.error(
+                    "Gemini failed after %s attempts.",
+                    MAX_ATTEMPTS,
                 )
                 raise
 
-            if attempt == MAX_ATTEMPTS - 1:
-                logger.exception(
-                    "Gemini failed after all retry attempts."
-                )
-                raise
-
-            delay = RETRY_DELAYS[attempt]
+            # Small randomized delay to avoid synchronized retries.
+            delay = 1.0 + random.uniform(0, 0.5)
 
             logger.warning(
-                "Gemini returned HTTP %s. "
-                "Retrying in %s second(s), attempt %s/%s.",
-                status_code,
+                "Retrying Gemini in %.2f seconds...",
                 delay,
-                attempt + 2,
-                MAX_ATTEMPTS,
             )
 
             time.sleep(delay)
 
-    raise RuntimeError("Gemini could not generate a response.")
+    raise RuntimeError(
+        "Gemini failed to generate a response."
+    )

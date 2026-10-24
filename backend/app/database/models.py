@@ -71,3 +71,62 @@ class ChatMessage(Base):
         "ChatSession",
         back_populates="messages"
     )
+
+
+class ChatRequestRecord(Base):
+    __tablename__ = "chat_request_records"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        index=True
+    )
+
+    request_id: Mapped[str] = mapped_column(
+        String(36),
+        unique=True,
+        nullable=False,
+        index=True
+    )
+
+    session_id: Mapped[int] = mapped_column(
+        ForeignKey("chat_sessions.id"),
+        nullable=False
+    )
+
+    user_message_id: Mapped[int] = mapped_column(
+        ForeignKey("chat_messages.id"),
+        nullable=False
+    )
+
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="processing"
+    )
+
+    response: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow
+    )
+    attempt_count: Mapped[int] = mapped_column(
+    Integer,
+    nullable=False,
+    default=1
+    )
+
+    processing_started_at: Mapped[datetime | None] = mapped_column(
+    DateTime,
+    nullable=True
+    )
