@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routes.chat import router as chat_router
 from app.database.database import engine, Base
 from app.database import models
+from app.routes.memory import router as memory_router
 
 
 app = FastAPI(
@@ -29,7 +30,7 @@ def startup_event():
 
 
 app.include_router(chat_router)
-
+app.include_router(memory_router)
 
 @app.get("/")
 def root():
