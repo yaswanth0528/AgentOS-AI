@@ -1,5 +1,4 @@
-
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import "./app.css";
 
 const API_BASE = "http://127.0.0.1:8000";
@@ -17,16 +16,6 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const [pending, setPending] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem(PENDING_KEY) || "null");
-    } catch {
-      return null;
-    }
-  });
-
-  const sendingRef = useRef(false);
-
   useEffect(() => {
     if (!sessionId) return;
 
@@ -41,48 +30,30 @@ function App() {
           setSessionId(null);
           return [];
         }
-
-        if (!response.ok) {
-          throw new Error(
-            `History request failed (${response.status})`
-          );
-        }
-
+        if (!response.ok) throw new Error(`History request failed (${response.status})`);
         return response.json();
       })
       .then((history) => {
-        if (!controller.signal.aborted && Array.isArray(history)) {
-          setMessages(
-            history.map((item) => ({
-              role: item.role,
-              content: item.content,
-            }))
-          );
+        if (Array.isArray(history)) {
+          setMessages(history.map((item) => ({
+            role: item.role,
+            content: item.content,
+          })));
         }
       })
       .catch((err) => {
-        if (err.name !== "AbortError") {
-          console.error("History restoration failed:", err);
-        }
+        if (err.name !== "AbortError") console.error("Could not restore history:", err);
       });
 
     return () => controller.abort();
   }, [sessionId]);
 
-  const saveSession = (id) => {
-    setSessionId(id);
-    localStorage.setItem(SESSION_KEY, String(id));
-  };
+  const sendMessage = async () => {
+    const userText = message.trim();
+    if (!userText || loading) return;
 
-  const clearPending = () => {
-    setPending(null);
-    localStorage.removeItem(PENDING_KEY);
-  };
-
-  const submitRequest = async (payload, isRetry = false) => {
-    if (sendingRef.current) return;
-
-    sendingRef.current = true;
+    setMessages((prev) => [...prev, { role: "user", content: userText }]);
+    setMessage("");
     setLoading(true);
     setError("");
 
@@ -99,40 +70,26 @@ function App() {
     try {
       const response = await fetch(`${API_BASE}/chat`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: userText, session_id: sessionId }),
       });
 
       const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
-        const detail =
-          typeof data.detail === "string"
-            ? data.detail
-            : `AgentOS request failed (${response.status})`;
-
-        throw new Error(detail);
+        throw new Error(data.detail || `AgentOS request failed (${response.status})`);
       }
 
-      saveSession(data.session_id);
-
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: data.response,
-        },
-      ]);
-
-      clearPending();
+      setSessionId(data.session_id);
+      localStorage.setItem("agentos_session_id", String(data.session_id));
+      setMessages((prev) => [...prev, { role: "assistant", content: data.response }]);
     } catch (err) {
       console.error("AgentOS request error:", err);
-
-      setError(
-        err.message || "Could not connect to AgentOS."
-      );
+      setError(err.message || "Could not connect to AgentOS.");
+      setMessages((prev) => [...prev, {
+        role: "assistant",
+        content: `Sorry, I couldn't complete that request. ${err.message || ""}`.trim(),
+      }]);
     } finally {
       sendingRef.current = false;
       setLoading(false);
@@ -185,6 +142,21 @@ function App() {
     setMessages([]);
     setMessage("");
     setError("");
+    setMessage("");
+    setActivePage("chat");
+  };
+
+  const choosePrompt = (prompt) => {
+    setActivePage("chat");
+    setMessage(prompt);
+  };
+
+  const pageTitles = {
+    overview: "Overview",
+    chat: "Agent workspace",
+    history: "Conversation history",
+    memory: "Persistent memory",
+    tools: "Tools & integrations",
   };
 
   return (
@@ -194,95 +166,40 @@ function App() {
           <h1>AgentOS</h1>
           <p>AI Agent Assistant · Persistent chat memory</p>
         </div>
-
-        <button
-          className="new-chat"
-          onClick={startNewChat}
-          disabled={loading}
-        >
-          New chat
-        </button>
+        <button className="new-chat" onClick={startNewChat} disabled={loading}>New chat</button>
       </header>
-
       <main className="chat-container">
         <div className="messages">
           {messages.length === 0 && (
             <div className="welcome">
               <h2>Welcome to AgentOS</h2>
-              <p>
-                Ask me anything. Your conversation history
-                is saved in the AgentOS database.
-              </p>
+              <p>Ask me anything. Your chat history is saved in AgentOS database.</p>
             </div>
           )}
-
           {messages.map((msg, index) => (
-            <div
-              key={`${index}-${msg.role}`}
-              className={`message ${
-                msg.role === "user"
-                  ? "user-message"
-                  : "ai-message"
-              }`}
-            >
-              <div className="message-label">
-                {msg.role === "user" ? "You" : "AgentOS"}
-              </div>
-
-              <div className="message-content">
-                {msg.content}
-              </div>
+            <div key={`${index}-${msg.role}`} className={`message ${msg.role === "user" ? "user-message" : "ai-message"}`}>
+              <div className="message-label">{msg.role === "user" ? "You" : "AgentOS"}</div>
+              <div className="message-content">{msg.content}</div>
             </div>
           ))}
-
           {loading && (
             <div className="message ai-message">
               <div className="message-label">AgentOS</div>
-              <div className="message-content">
-                Thinking...
-              </div>
+              <div className="message-content">Thinking...</div>
             </div>
           )}
         </div>
-
-        {error && (
-          <div className="error-banner">
-            {error}
-          </div>
-        )}
-
-        {pending && !loading && (
-          <div className="retry-area">
-            <button onClick={retryMessage}>
-              Retry request
-            </button>
-
-            <button onClick={discardPending}>
-              Dismiss
-            </button>
-          </div>
-        )}
-
+        {error && <div className="error-banner">{error}</div>}
         <div className="input-area">
           <input
             type="text"
             value={message}
-            onChange={(event) =>
-              setMessage(event.target.value)
-            }
+            onChange={(event) => setMessage(event.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Message AgentOS..."
-            disabled={loading || Boolean(pending)}
+            disabled={loading}
           />
-
-          <button
-            onClick={sendMessage}
-            disabled={
-              loading ||
-              Boolean(pending) ||
-              !message.trim()
-            }
-          >
+          <button onClick={sendMessage} disabled={loading || !message.trim()}>
             {loading ? "Thinking…" : "Send"}
           </button>
         </div>
