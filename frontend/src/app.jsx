@@ -76,8 +76,9 @@ function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          message: userText,
-          session_id: sessionId,
+        message: userText,
+        session_id: sessionId,
+        request_id: crypto.randomUUID(),
         }),
       });
 
